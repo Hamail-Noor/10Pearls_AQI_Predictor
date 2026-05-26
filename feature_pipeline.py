@@ -18,13 +18,18 @@ def run_hourly_extraction():
         raise ValueError("Could not resolve city coordinates.")
     lat, lon = geo_res[0]['lat'], geo_res[0]['lon']
     
-    # 2. Grab raw values from API
+    # 2. Grab current weather values (Temperature)
+    weather_url = f"https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&units=metric&appid={WEATHER_KEY}"
+    w_res = requests.get(weather_url).json()
+    base_temp = float(w_res['main']['temp']) # <-- Grab the live temperature!
+    
+    # 3. Grab raw pollutant values from API
     aqi_url = f"http://api.openweathermap.org/data/2.5/air_pollution?lat={lat}&lon={lon}&appid={WEATHER_KEY}"
     aqi_res = requests.get(aqi_url).json()
     base_components = aqi_res['list'][0]['components']
     base_aqi = float(aqi_res['list'][0]['main']['aqi'])
     
-    # 3. Handle data frames checking for existing records
+    # 4. Handle data frames checking for existing records
     if os.path.exists(FEATURE_STORE_FILE):
         df = pd.read_csv(FEATURE_STORE_FILE)
         df['timestamp'] = pd.to_datetime(df['timestamp'])
@@ -32,11 +37,12 @@ def run_hourly_extraction():
         print("ℹ️ Feature Store file missing. Initializing standard baseline row...")
         df = pd.DataFrame()
 
-    # 4. Engineer fresh row mapping features
+    # 5. Engineer fresh row mapping features
     new_row = base_components.copy()
     current_time = datetime.datetime.utcnow()
     
     new_row['aqi'] = base_aqi
+    new_row['temp'] = base_temp  # <-- Secure it as a target row variable!
     new_row['timestamp'] = current_time
     new_row['city'] = CITY_TARGET
     new_row['hour'] = current_time.hour
@@ -46,12 +52,12 @@ def run_hourly_extraction():
     new_df = pd.DataFrame([new_row])
     df = pd.concat([df, new_df], ignore_index=True).sort_values(by='timestamp').reset_index(drop=True)
     
-    # 5. Compute mandated derived change rate metric
+    # 6. Compute mandated derived change rate metric
     df['aqi_change_rate'] = df['aqi'].diff().fillna(0.0)
     
     # Commit changes back to storage
     df.to_csv(FEATURE_STORE_FILE, index=False)
-    print(f"✅ Success. Feature Store updated. Total database scale: {len(df)} records.")
+    print(f"✅ Success. Feature Store updated with AQI and Temperature. Total database scale: {len(df)} records.")
 
 if __name__ == "__main__":
     if not WEATHER_KEY:
